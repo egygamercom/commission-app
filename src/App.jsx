@@ -129,7 +129,7 @@ const STYLES = `
   @media(max-width:480px){.page-title{font-size:18px}}
 `;
 
-const BRANCHES = ["Cairo","Alex","Giza","Mansoura"];
+// Branches loaded dynamically from Supabase
 const CATEGORY_EMOJIS = {"New Devices":"📱","Fabrika Devices":"🏭","Used Games":"🎮"};
 
 function generateId() { return Date.now()+Math.random().toString(36).substr(2,5); }
@@ -163,6 +163,7 @@ export default function App() {
   const [modal,       setModal]       = useState(null);
   const [users,       setUsers]       = useState([]);
   const [sales,       setSales]       = useState([]);
+  const [branches,    setBranches]    = useState([]);
   const [rates,       setRates]       = useState({"New Devices":75,"Fabrika Devices":50,"Used Games":25});
   const [lockDays,    setLockDays]    = useState(7);
   const [loading,     setLoading]     = useState(true);
@@ -172,14 +173,16 @@ export default function App() {
   async function loadAll() {
     setLoading(true);
     try {
-      const [{data:ud},{data:sd},{data:ld},{data:set}] = await Promise.all([
+      const [{data:ud},{data:sd},{data:ld},{data:set},{data:bd}] = await Promise.all([
         supabase.from("users").select("*"),
         supabase.from("sales").select("*").order("date",{ascending:false}),
         supabase.from("sale_lines").select("*"),
         supabase.from("settings").select("*").eq("id",1).single(),
+        supabase.from("branches").select("*").order("name"),
       ]);
       setUsers(ud||[]);
       setSales((sd||[]).map(s=>({...s,employeeId:s.employee_id,returnDate:s.return_date,lines:(ld||[]).filter(l=>l.sale_id===s.id)})));
+      setBranches((bd||[]).map(b=>b.name));
       if (set) { setRates(set.rates); setLockDays(set.lock_days); }
     } catch(e) { notify("❌ Failed to load data","error"); }
     setLoading(false);
@@ -216,6 +219,17 @@ export default function App() {
   async function removeUser(id) {
     await supabase.from("users").delete().eq("id",id);
     await loadAll(); notify("🗑 User removed!");
+  }
+
+  async function addBranch(name) {
+    const {error}=await supabase.from("branches").insert({name});
+    if (error) { notify("❌ Branch already exists or error","error"); return; }
+    await loadAll(); notify("✅ Branch added!");
+  }
+
+  async function removeBranch(name) {
+    await supabase.from("branches").delete().eq("name",name);
+    await loadAll(); notify("🗑 Branch removed!");
   }
 
   if (loading) return (<><style>{STYLES}</style><div className="loading">⏳ Loading…</div></>);
@@ -265,11 +279,11 @@ export default function App() {
             )}
           </div>
         </div>
-        {page==="dashboard" &&<DashboardPage user={user} sales={sales} rates={rates} lockDays={lockDays} users={users}/>}
-        {page==="sales"     &&<SalesPage user={user} sales={sales} users={users} lockDays={lockDays} onReturn={returnSale} setModal={setModal}/>}
-        {page==="my-sales"  &&<SalesPage user={user} sales={sales.filter(s=>s.employeeId===user.id)} users={users} lockDays={lockDays} onReturn={returnSale} setModal={setModal} mine/>}
-        {page==="employees" &&<EmployeesPage users={users} onAdd={addUser} onRemove={removeUser} branches={BRANCHES}/>}
-        {page==="settings"  &&<SettingsPage rates={rates} lockDays={lockDays} onSave={saveSettings}/>}
+        {page==="dashboard" &&<DashboardPage user={user} sales={sales} rates={rates} lockDays={lockDays} users={users} branches={branches}/>}
+        {page==="sales"     &&<SalesPage user={user} sales={sales} users={users} lockDays={lockDays} onReturn={returnSale} setModal={setModal} branches={branches}/>}
+        {page==="my-sales"  &&<SalesPage user={user} sales={sales.filter(s=>s.employeeId===user.id)} users={users} lockDays={lockDays} onReturn={returnSale} setModal={setModal} mine branches={branches}/>}
+        {page==="employees" &&<EmployeesPage users={users} onAdd={addUser} onRemove={removeUser} branches={branches}/>}
+        {page==="settings"  &&<SettingsPage rates={rates} lockDays={lockDays} onSave={saveSettings} branches={branches} onAddBranch={addBranch} onRemoveBranch={removeBranch}/>}
         {page==="reports"   &&<ReportsPage user={user} sales={sales} users={users} lockDays={lockDays}/>}
         {page==="csv"       &&<CSVPage user={user} users={users} rates={rates} onImport={addSale} notify={notify}/>}
       </main>
@@ -310,7 +324,7 @@ function LoginPage({users,onLogin}) {
   );
 }
 
-function DashboardPage({user,sales,lockDays,users}) {
+function DashboardPage({user,sales,lockDays,users,branches}) {
   const now=new Date(); const thisMonth=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
   const mySales=user.role==="employee"?sales.filter(s=>s.employeeId===user.id):sales;
   const branchSales=user.role==="manager"?sales.filter(s=>s.branch===user.branch):mySales;
@@ -372,7 +386,7 @@ function DashboardPage({user,sales,lockDays,users}) {
           <div className="section-header"><div className="section-title">🏪 Branch Overview</div></div>
           <div className="table-wrap"><table>
             <thead><tr><th>Branch</th><th>Sales</th><th>Commission</th><th>Pending</th><th>Confirmed</th></tr></thead>
-            <tbody>{BRANCHES.map(branch=>{const bs=sales.filter(s=>s.branch===branch&&monthKey(s.date)===thisMonth);return(
+            <tbody>{branches.map(branch=>{const bs=sales.filter(s=>s.branch===branch&&monthKey(s.date)===thisMonth);return(
               <tr key={branch}><td>🏪 {branch}</td><td className="mono">{bs.filter(s=>!s.returned).length}</td><td className="mono text-green">{formatEGP(calcC(bs))}</td><td className="mono text-yellow">{formatEGP(calcS(bs,"pending"))}</td><td className="mono text-green">{formatEGP(calcS(bs,"confirmed"))}</td></tr>
             );})}</tbody>
           </table></div>
@@ -382,7 +396,7 @@ function DashboardPage({user,sales,lockDays,users}) {
   );
 }
 
-function SalesPage({user,sales,users,lockDays,onReturn,setModal,mine}) {
+function SalesPage({user,sales,users,lockDays,onReturn,setModal,mine,branches}) {
   const [filter,setFilter]=useState({month:"",status:"",branch:""}); const [search,setSearch]=useState("");
   const filtered=sales.filter(s=>{
     if(filter.month&&!s.date.startsWith(filter.month))return false;
@@ -405,7 +419,7 @@ function SalesPage({user,sales,users,lockDays,onReturn,setModal,mine}) {
           </div>
           {user.role==="admin"&&<div className="form-group"><label className="form-label">🏪 Branch</label>
             <select className="form-control" value={filter.branch} onChange={e=>setFilter(f=>({...f,branch:e.target.value}))}>
-              <option value="">All</option>{BRANCHES.map(b=><option key={b}>{b}</option>)}
+              <option value="">All</option>{branches.map(b=><option key={b}>{b}</option>)}
             </select>
           </div>}
         </div>
@@ -533,8 +547,17 @@ function EmployeesPage({users,onAdd,onRemove,branches}) {
   );
 }
 
-function SettingsPage({rates,lockDays,onSave}) {
+function SettingsPage({rates,lockDays,onSave,branches,onAddBranch,onRemoveBranch}) {
   const [lr,setLr]=useState({...rates}); const [ll,setLl]=useState(lockDays);
+  const [newBranch,setNewBranch]=useState("");
+
+  function handleAddBranch(){
+    const name=newBranch.trim();
+    if(!name)return;
+    onAddBranch(name);
+    setNewBranch("");
+  }
+
   return (
     <div style={{display:"flex",flexDirection:"column",gap:16,maxWidth:500}}>
       <div className="card">
@@ -549,6 +572,25 @@ function SettingsPage({rates,lockDays,onSave}) {
         <div className="alert alert-info mt-4">Sales older than <strong>{ll} days</strong> will be automatically confirmed.</div>
       </div>
       <button className="btn btn-primary" onClick={()=>onSave(lr,ll)}>💾 Save Settings</button>
+
+      <div className="card">
+        <div className="section-title mb-4">🏪 Manage Branches</div>
+        <div style={{display:"flex",gap:8,marginBottom:16}}>
+          <input className="form-control" placeholder="New branch name…" value={newBranch} onChange={e=>setNewBranch(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleAddBranch()} style={{flex:1}}/>
+          <button className="btn btn-primary" onClick={handleAddBranch}>➕ Add</button>
+        </div>
+        {branches.length===0
+          ? <div className="empty"><div className="empty-icon">🏪</div><div>No branches yet</div></div>
+          : <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {branches.map(b=>(
+                <div key={b} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",background:"var(--surface2)",borderRadius:"var(--r-sm)",border:"1px solid var(--border)"}}>
+                  <span style={{fontSize:14,fontWeight:600}}>🏪 {b}</span>
+                  <button className="btn btn-danger btn-sm" onClick={()=>onRemoveBranch(b)}>🗑 Remove</button>
+                </div>
+              ))}
+            </div>
+        }
+      </div>
     </div>
   );
 }
