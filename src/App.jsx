@@ -189,7 +189,7 @@ export default function App() {
 
   async function addSale(sale) {
     const id=generateId();
-    await supabase.from("sales").insert({id,employee_id:sale.employeeId,branch:sale.branch,date:sale.date,returned:false,return_date:null,note:sale.note||""});
+    await supabase.from("sales").insert({id,employee_id:sale.employeeId,branch:sale.branch,date:sale.date,returned:false,return_date:null,note:sale.note||"",order_number:sale.orderNumber||""});
     await supabase.from("sale_lines").insert(sale.lines.map(l=>({id:generateId(),sale_id:id,category:l.category,quantity:l.quantity,commission:l.commission})));
     await loadAll();
     notify("✅ Sale recorded successfully!");
@@ -416,13 +416,14 @@ function SalesPage({user,sales,users,lockDays,onReturn,setModal,mine}) {
         </div>
       </div>
       <div className="table-wrap"><table>
-        <thead><tr><th>Date</th><th>Employee</th><th>Branch</th><th>Items</th><th>Commission</th><th>Status</th><th>Action</th></tr></thead>
+        <thead><tr><th>Date</th><th>Order #</th><th>Employee</th><th>Branch</th><th>Items</th><th>Commission</th><th>Status</th><th>Action</th></tr></thead>
         <tbody>
           {filtered.length===0?<tr><td colSpan={7} style={{textAlign:"center",padding:40,color:"var(--text3)"}}>No sales found 📭</td></tr>
           :[...filtered].sort((a,b)=>new Date(b.date)-new Date(a.date)).map(s=>{
             const emp=users.find(u=>u.id===s.employeeId); const status=getStatus(s,lockDays); const total=s.lines.reduce((a,l)=>a+Number(l.commission),0);
             return(<tr key={s.id}>
               <td className="mono" style={{fontSize:12}}>{s.date}</td>
+              <td className="mono" style={{fontSize:12,color:"var(--accent4)"}}>{s.order_number||"—"}</td>
               <td><div style={{display:"flex",alignItems:"center",gap:8}}><div className="avatar" style={{width:26,height:26,fontSize:11}}>{emp?.name[0]}</div>{emp?.name}</div></td>
               <td>🏪 {s.branch}</td>
               <td>{s.lines.map(l=><div key={l.id} style={{fontSize:12,color:"var(--text2)"}}>{CATEGORY_EMOJIS[l.category]} {l.category} × {l.quantity}</div>)}</td>
@@ -441,12 +442,12 @@ function SaleModal({user,rates,users,onClose,onSave}) {
   const [date,setDate]=useState(new Date().toISOString().split("T")[0]);
   const [empId,setEmpId]=useState(user.role==="employee"?user.id:"");
   const [lines,setLines]=useState([{id:generateId(),category:"New Devices",quantity:1}]);
-  const [note,setNote]=useState(""); const [saving,setSaving]=useState(false);
+  const [note,setNote]=useState(""); const [orderNumber,setOrderNumber]=useState(""); const [saving,setSaving]=useState(false);
   const employees=users.filter(u=>u.role==="employee"&&(user.role==="admin"?true:u.branch===user.branch));
   const computedLines=lines.map(l=>({...l,commission:rates[l.category]*l.quantity}));
   const total=computedLines.reduce((a,l)=>a+l.commission,0);
   const selectedEmp=users.find(u=>u.id===Number(empId));
-  async function handleSave(){if(!empId)return;setSaving(true);await onSave({employeeId:Number(empId),branch:selectedEmp?.branch,date,lines:computedLines,note});setSaving(false);}
+  async function handleSave(){if(!empId)return;setSaving(true);await onSave({employeeId:Number(empId),branch:selectedEmp?.branch,date,lines:computedLines,note,orderNumber});setSaving(false);}
   return (
     <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
       <div className="modal">
@@ -460,6 +461,7 @@ function SaleModal({user,rates,users,onClose,onSave}) {
             </div>
             <div className="form-group"><label className="form-label">📅 Date</label><input className="form-control" type="date" value={date} onChange={e=>setDate(e.target.value)}/></div>
           </div>
+          <div className="form-group"><label className="form-label">🧾 Order Number</label><input className="form-control" placeholder="e.g. ORD-00123" value={orderNumber} onChange={e=>setOrderNumber(e.target.value)}/></div>
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
             <div className="form-label">📦 Sale Lines</div>
             {computedLines.map(line=>(
